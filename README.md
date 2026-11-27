@@ -173,8 +173,9 @@ function checkHole() {
   if (ball.position.y < terrainMinHeight - 5) resetBall();
 }
 ```
+Nota: en la función initInupt se ha añadido un eventListener que comprueba si se ha presionado la tecla "R" o "r" y si ese es el caso, resetea la posición de la bola.
 
-Luego solo queda llamar en createObjects() a createBall() y al método checkHole() en animationLoop(), justo después de updatePhysics()
+Luego solo queda llamar en createObjects() a createBall() y al método checkHole() en animationLoop(), justo después de updatePhysics().
 
 <img src=".//readme_assets/campo_y_bola.png" alt="bola añadida" width="100%">
 
@@ -395,6 +396,7 @@ let terrainBody;
 
 const tee = new THREE.Vector2(); 
 const hole = new THREE.Vector2();
+let holeRing;
 let plateauHeight = 0.5;
 
 // ---------- Niveles ----------
@@ -539,11 +541,12 @@ const levels = [
       height: 0.5
     },
     obstacles: [
-      wall(-7, -10, -7, 3),
-      wall(-7, 3, 1, 3),
-      wall(-1, -3, -1, 10),
-      wall(-1, -3, 7, -3),
-      wall(7, -3, 7, 10)
+      wall(-12, -5, -2, -5),
+      wall(2, -5, 12, -5),
+      wall(-12, 0, -8, 0),
+      wall(-4, 0, 12, 0),
+      wall(-12, 5, 4, 5),
+      wall(8, 5, 12, 5)
     ]
   }
 ]
@@ -614,28 +617,29 @@ function loadLevel(index) {
 }
 ```
 
-Por último debemos modificar la función createObjects para que llame a loadLevel donde antes creaba el terreno gráfico y físico
+Por último debemos modificar la función createObjects para que llame a loadLevel donde antes creaba el terreno gráfico y físico, además de pasar a usar la variable holeRing que definimos antes en vez de la constante aro
 
 ```js
 function createObjects() {
+
+  //Marca visual del hoyo (aro blanco) y de la salida
+  holeRing  = new THREE.Mesh(
+    new THREE.RingGeometry(holeRadius * 0.95, holeRadius, 48),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
+  );
+  holeRing.rotation.x = -Math.PI / 2;
+  holeRing.position.set(
+    hole.x,
+    getHeightAt(hole.x, hole.y) + holeDepth + 0.02,
+    hole.y
+  );
+  scene.add(holeRing);
+
   // Cargar nivel actual
   loadLevel(currentLevel);
 
   //Bordes del campo
   createBorders();
-
-  //Marca visual del hoyo (aro blanco) y de la salida
-  const aro = new THREE.Mesh(
-    new THREE.RingGeometry(holeRadius * 0.95, holeRadius, 48),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
-  );
-  aro.rotation.x = -Math.PI / 2;
-  aro.position.set(
-    hole.x,
-    getHeightAt(hole.x, hole.y) + holeDepth + 0.02,
-    hole.y
-  );
-  scene.add(aro);
 
   //Bola
   createBall();
@@ -643,4 +647,213 @@ function createObjects() {
 ```
 
 Con esto ya podríamos visualizar el nivel 1
+
+<img src=".//readme_assets/nivel_1.gif" alt="nivel 1" width="100%">
+
+### Pasar de nivel + HUD
+
+Ahora que podemos jugar varios niveles es cuando podemos incluir una interfaz que nos indique el nivel en el que estamos, los golpeos que hemos realizado en cada nivel y durante la partida, y añadir una interfaz que nos permita cambiar de nivel una vez hemos completado el nivel.
+
+Para actualizar el contador de golpeos sencillamente debemos ir a la funcion onPointerUp y cuando se golpea la pelota, incrementar los contadores strokes y totalStrokes
+
+```js
+function onPointerUp() {
+  if (!aiming) return;
+  aiming = false;
+  controls.enabled = true;
+  aimArrow.visible = false;
+  dragLine.visible = false;
+
+  if (shotPower < minPower) return;
+
+  const imp = shotPower * maxImpulse;
+
+  strokes += 1;
+  totalStrokes += 1;
+
+  ballBody.activate();
+  ballBody.applyCentralImpulse(
+    new Ammo.btVector3(shotDir.x * imp, 0, shotDir.z * imp)
+  );
+}
+```
+
+Para esta interfaz ya se encuentra la variable hud y vamos a definir dos funciones para la interfaz, una que la inicializa y una que la actualiza:
+
+```js
+
+function createHUD() {
+  hud = document.createElement("div");
+
+  hud.style.position = "fixed";
+  hud.style.top = "20px";
+  hud.style.left = "50%";
+  hud.style.transform = "translateX(-50%)";
+
+  hud.style.padding = "12px 28px";
+  hud.style.background = "rgba(0, 0, 0, 0.75)";
+  hud.style.border = "1px solid rgba(255, 255, 255, 0.25)";
+  hud.style.borderRadius = "12px";
+
+  hud.style.color = "white";
+  hud.style.fontFamily = "Arial, sans-serif";
+  hud.style.fontSize = "18px";
+  hud.style.fontWeight = "bold";
+  hud.style.textAlign = "center";
+
+  // Evita que la interfaz interfiera con los controles del juego
+  hud.style.pointerEvents = "none";
+
+  document.body.appendChild(hud);
+
+  updateHUD();
+}
+
+function updateHUD() {
+  hud.textContent =
+    `${levels[currentLevel].name}  |  ` +
+    `Golpes: ${strokes}  |  ` +
+    `Total: ${totalStrokes}`;
+}
+
+```
+
+A la función createHUD se le llama en la función start, y llamaremos a updateHUD cada vez que golpeemos la pelota (es decir, en onPointerUp) y al cargar el nivel (en loadLevel).
+
+Podemos comprobar que el jugador haya completado el nivel si el valor de holeScored == True, pero debemos implementar una interfaz que avise al jugador que ha terminado el nivel y que debe irse al siguiente, para ello vamos a implementar un modal que contiene esta información y que aparece cuando termina el nivel:
+
+```js
+let levelCompleteModal;
+let levelCompleteShown = false;
+
+...
+
+function createLevelCompleteModal() {
+  levelCompleteModal = document.createElement("div");
+
+  // Fondo oscuro que cubre la pantalla
+  Object.assign(levelCompleteModal.style, {
+    position: "fixed",
+    top: "0",
+    left: "0",
+    width: "100%",
+    height: "100%",
+    display: "none",
+    justifyContent: "center",
+    alignItems: "center",
+    background: "rgba(0, 0, 0, 0.6)",
+    zIndex: "1000"
+  });
+
+  // Contenedor de la ventana
+  const panel = document.createElement("div");
+
+  Object.assign(panel.style, {
+    background: "#ffffff",
+    padding: "35px 50px",
+    borderRadius: "15px",
+    textAlign: "center",
+    fontFamily: "Arial, sans-serif",
+    boxShadow: "0 5px 25px rgba(0,0,0,0.3)"
+  });
+
+  // Mensaje
+  const title = document.createElement("h2");
+  title.textContent = "¡Nivel superado!";
+  title.style.color = "#333333";
+
+  // Botón
+  const button = document.createElement("button");
+  button.textContent = "Siguiente nivel";
+
+  Object.assign(button.style, {
+    padding: "12px 25px",
+    marginTop: "15px",
+    border: "none",
+    borderRadius: "8px",
+    background: "#3a9d3a",
+    color: "white",
+    fontSize: "16px",
+    fontWeight: "bold",
+    cursor: "pointer"
+  });
+
+  // Acción del botón
+  button.addEventListener("click", nextLevel);
+
+  panel.appendChild(title);
+  panel.appendChild(button);
+  levelCompleteModal.appendChild(panel);
+
+  document.body.appendChild(levelCompleteModal);
+}
+
+function showLevelCompleteModal() {
+  levelCompleteModal.style.display = "flex";
+}
+```
+
+Hemos definido una variable que contendrá el modal y un booleano que nos indica si se ha mostrado el modal al completar un nivel o no, y hemos declarado una función que inicializa el modal (createLevelCompleteModal) y otra que lo muestra al llamarlo (showLevelCompleteModal).
+
+Este modal contiene un boton que llama a una función nextLevel() que se encarga de eliminar todos los objetos referentes al nivel actual y de cargar el siguiente nivel:
+
+```js
+
+function nextLevel() {
+  // Comprobar si quedan niveles
+  if (currentLevel >= levels.length - 1) {
+    levelCompleteModal.style.display = "none";
+    alert("¡Enhorabuena! Has completado todos los niveles.");
+    return;
+  }
+
+  for (const object of levelObjects) {
+    scene.remove(object);
+
+    const body = object.userData.physicsBody;
+
+    if (body) {
+      physicsWorld.removeRigidBody(body);
+    }
+
+    object.geometry.dispose();
+  }
+
+  levelObjects.length = 0;
+
+  currentLevel++;
+  strokes = 0;
+
+  levelCompleteModal.style.display = "none";
+  levelCompleteShown = false;
+
+
+  loadLevel(currentLevel);
+  
+  resetBall();
+  updateHUD();
+}
+```
+
+A la función createLevelCompleteModal la llamamos junto a createHUD en start, y a showLevelCompleteModal lo llamamos cuando el jugador haya completado el juego y no hayamos mostrado el modal
+
+```js
+function animationLoop() {
+  requestAnimationFrame(animationLoop);
+
+  const deltaTime = clock.getDelta();
+
+  updatePhysics(deltaTime);
+  checkHole();
+
+  if (holeScored && !levelCompleteShown) {
+    levelCompleteShown = true;
+    showLevelCompleteModal();
+  }
+
+  renderer.render(scene, camera);
+}
+```
+
+Y con esto podríamos pasar entre niveles una vez completamos uno, y concluiría el desarrollo del minijuego
 

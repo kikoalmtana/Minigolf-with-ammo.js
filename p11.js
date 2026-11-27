@@ -44,6 +44,7 @@ const hole = new THREE.Vector2();
 let plateauHeight = 0.5;
 const holeRadius = 1.3;
 const holeDepth = 0.5;
+let holeRing;
 let holeScored = false;
 
 // ---------- Parámetros del golpeo ----------
@@ -71,6 +72,9 @@ const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x8b5a2b });
 const obstacleMaterial = new THREE.MeshPhongMaterial({ color: 0xb0623a });
 const yAxis = new THREE.Vector3(0, 1, 0);
 
+let levelCompleteModal;
+let levelCompleteShown = false;
+
 const levels = [
   {
     name: "Nivel 1",
@@ -94,29 +98,36 @@ const levels = [
       height: 0.5
     },
     obstacles: [
-      wall(-7, -10, -7, 3),
-      wall(-7, 3, 1, 3),
-      wall(-1, -3, -1, 10),
-      wall(-1, -3, 7, -3),
-      wall(7, -3, 7, 10)
+      wall(-15, -5, -2, -5),
+      wall(2, -5, 15, -5),
+      wall(-15, 0, -8, 0),
+      wall(-4, 0, 15, 0),
+      wall(-15, 5, 4, 5),
+      wall(8, 5, 15, 5)
     ]
   },
 
   {
     name: "Nivel 3",
-    tee: [-11, 0],
-    hole: [11, 0],
+    tee: [-12, -5],
+    hole: [8, 5],
     terrain: {
       height: 0.5
     },
-    obstacles: [
-      wall(-6, -3, -6, 3),
-      wall(-2, -3, -2, 3),
-      wall(2, -3, 2, 3),
-      wall(6, -3, 6, 3),
-      wall(-6, 3, -2, 3),
-      wall(2, -3, 6, -3)
-    ]
+  obstacles: [
+    wall(-10, -8, 10, -8),
+    wall(-10, -8, -10, -3),
+    wall(-10, -3, -3, -3),
+    wall(3, -3, 10, -3),
+    wall(10, -3, 10, 2),
+    wall(3, 2, 10, 2),
+    wall(-10, 2, -3, 2),
+    wall(-10, 2, -10, 7),
+    wall(-10, 7, 10, 7),
+    wall(-3, -8, -3, -3),
+    wall(3, -3, 3, 2),
+    wall(-3, 2, -3, 7)
+  ]
   }
 ];
 
@@ -133,6 +144,9 @@ function start() {
   );
   //Elementos gráficos
   initGraphics();
+  // Interfaz
+  createHUD();
+  createLevelCompleteModal();
   //Elementos del mundo físico
   initPhysics();
   //Objetos
@@ -352,24 +366,25 @@ function createTerrainBody() {
 // ====================== OBJETOS ======================
 
 function createObjects() {
+
+  //Marca visual del hoyo (aro blanco) y de la salida
+  holeRing  = new THREE.Mesh(
+    new THREE.RingGeometry(holeRadius * 0.95, holeRadius, 48),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
+  );
+  holeRing.rotation.x = -Math.PI / 2;
+  holeRing.position.set(
+    hole.x,
+    getHeightAt(hole.x, hole.y) + holeDepth + 0.02,
+    hole.y
+  );
+  scene.add(holeRing);
+
   // Cargar nivel actual
   loadLevel(currentLevel);
 
   //Bordes del campo
   createBorders();
-
-  //Marca visual del hoyo (aro blanco) y de la salida
-  const aro = new THREE.Mesh(
-    new THREE.RingGeometry(holeRadius * 0.95, holeRadius, 48),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
-  );
-  aro.rotation.x = -Math.PI / 2;
-  aro.position.set(
-    hole.x,
-    getHeightAt(hole.x, hole.y) + holeDepth + 0.02,
-    hole.y
-  );
-  scene.add(aro);
 
   //Bola
   createBall();
@@ -606,6 +621,11 @@ function onPointerUp() {
   if (shotPower < minPower) return;
 
   const imp = shotPower * maxImpulse;
+
+  strokes += 1;
+  totalStrokes += 1;
+  updateHUD()
+
   ballBody.activate();
   ballBody.applyCentralImpulse(
     new Ammo.btVector3(shotDir.x * imp, 0, shotDir.z * imp)
@@ -739,9 +759,170 @@ function loadLevel(index) {
   createTerrainMesh();
   createTerrainBody();
 
+  holeRing.position.set(
+    hole.x,
+    getHeightAt(hole.x, hole.y) + holeDepth + 0.02,
+    hole.y
+  );
+
   // Crear obstáculos
   createLevelObstacles(level);
+  updateHUD();
 }
+
+function nextLevel() {
+  // Comprobar si quedan niveles
+  if (currentLevel >= levels.length - 1) {
+    levelCompleteModal.style.display = "none";
+    alert("¡Enhorabuena! Has completado todos los niveles.");
+    return;
+  }
+
+  for (const object of levelObjects) {
+    scene.remove(object);
+
+    const body = object.userData.physicsBody;
+
+    if (body) {
+      physicsWorld.removeRigidBody(body);
+    }
+
+    object.geometry.dispose();
+  }
+
+   // Eliminar terreno anterior
+  if (terrainMesh) {
+    scene.remove(terrainMesh);
+    terrainMesh.geometry.dispose();
+    terrainMesh.material.dispose();
+  }
+  if (terrainBody) {
+    physicsWorld.removeRigidBody(terrainBody);
+  }
+  if (terrainShape) {
+    Ammo.destroy(terrainShape);
+  }
+  if (ammoHeightData) {
+    Ammo._free(ammoHeightData);
+    ammoHeightData = null;
+  }
+
+  levelObjects.length = 0;
+
+  currentLevel++;
+  strokes = 0;
+
+  levelCompleteModal.style.display = "none";
+  levelCompleteShown = false;
+
+
+  loadLevel(currentLevel);
+  
+  resetBall();
+  updateHUD();
+}
+
+// ====================== HUD ======================
+
+function createHUD() {
+  hud = document.createElement("div");
+
+  hud.style.position = "fixed";
+  hud.style.top = "20px";
+  hud.style.left = "50%";
+  hud.style.transform = "translateX(-50%)";
+
+  hud.style.padding = "12px 28px";
+  hud.style.background = "rgba(0, 0, 0, 0.75)";
+  hud.style.border = "1px solid rgba(255, 255, 255, 0.25)";
+  hud.style.borderRadius = "12px";
+
+  hud.style.color = "white";
+  hud.style.fontFamily = "Arial, sans-serif";
+  hud.style.fontSize = "18px";
+  hud.style.fontWeight = "bold";
+  hud.style.textAlign = "center";
+
+  // Evita que la interfaz interfiera con los controles del juego
+  hud.style.pointerEvents = "none";
+
+  document.body.appendChild(hud);
+
+  updateHUD();
+}
+
+function updateHUD() {
+  hud.textContent =
+    `${levels[currentLevel].name}  |  ` +
+    `Golpes en el nivel: ${strokes}  |  ` +
+    `Golpes acumulados: ${totalStrokes}`;
+}
+
+
+function createLevelCompleteModal() {
+  levelCompleteModal = document.createElement("div");
+
+  // Fondo oscuro que cubre la pantalla
+  Object.assign(levelCompleteModal.style, {
+    position: "fixed",
+    top: "0",
+    left: "0",
+    width: "100%",
+    height: "100%",
+    display: "none",
+    justifyContent: "center",
+    alignItems: "center",
+    background: "rgba(0, 0, 0, 0.6)",
+    zIndex: "1000"
+  });
+
+  // Contenedor de la ventana
+  const panel = document.createElement("div");
+
+  Object.assign(panel.style, {
+    background: "#ffffff",
+    padding: "35px 50px",
+    borderRadius: "15px",
+    textAlign: "center",
+    fontFamily: "Arial, sans-serif",
+    boxShadow: "0 5px 25px rgba(0,0,0,0.3)"
+  });
+
+  // Mensaje
+  const title = document.createElement("h2");
+  title.textContent = "¡Nivel superado!";
+  title.style.color = "#333333";
+
+  // Botón
+  const button = document.createElement("button");
+  button.textContent = "Siguiente nivel";
+
+  Object.assign(button.style, {
+    padding: "12px 25px",
+    marginTop: "15px",
+    border: "none",
+    borderRadius: "8px",
+    background: "#3a9d3a",
+    color: "white",
+    fontSize: "16px",
+    fontWeight: "bold",
+    cursor: "pointer"
+  });
+
+  // Acción del botón
+  button.addEventListener("click", nextLevel);
+
+  panel.appendChild(title);
+  panel.appendChild(button);
+  levelCompleteModal.appendChild(panel);
+
+  document.body.appendChild(levelCompleteModal);
+}
+
+function showLevelCompleteModal() {
+  levelCompleteModal.style.display = "flex";
+}
+
 
 // ====================== EVENTOS ======================
 
@@ -797,8 +978,15 @@ function animationLoop() {
   requestAnimationFrame(animationLoop);
 
   const deltaTime = clock.getDelta();
+
   updatePhysics(deltaTime);
   checkHole();
+
+  // Mostrar la ventana una única vez
+  if (holeScored && !levelCompleteShown) {
+    levelCompleteShown = true;
+    showLevelCompleteModal();
+  }
 
   renderer.render(scene, camera);
 }
