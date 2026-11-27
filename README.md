@@ -861,8 +861,8 @@ Y con esto podríamos pasar entre niveles una vez completamos uno, y concluiría
 
 ### Referencias y uso de IA
 
-- ![Conversación con Claude para adaptar el código base](https://claude.ai/share/745cff88-0ed4-4286-bd6c-cad910004e13)
+- [Conversación con Claude para adaptar el código base](https://claude.ai/share/745cff88-0ed4-4286-bd6c-cad910004e13)
 
-- ![Conversación con Claude para la mecánica del golpeo de la bola](https://claude.ai/share/13561214-1b3d-4c99-be79-8eb9c82c7e14)
+- [Conversación con Claude para la mecánica del golpeo de la bola](https://claude.ai/share/13561214-1b3d-4c99-be79-8eb9c82c7e14)
 
-- ![Conversación con ChatGPT para diseñar los niveles](https://chatgpt.com/c/6b09e597-6b00-83eb-8eb1-d6c77787ce0e)
+- [Conversación con ChatGPT para diseñar los niveles](https://chatgpt.com/c/6b09e597-6b00-83eb-8eb1-d6c77787ce0e)
