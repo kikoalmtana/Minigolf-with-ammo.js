@@ -31,15 +31,17 @@ const terrainMinHeight = -1;
 let heightData = null;
 let ammoHeightData = null;      
 let terrainMesh;
+let terrainShape;
+let terrainBody;
 
 // ---------- Parámetros del juego ----------
 const ballRadius = 0.25;
 const ballMass = 0.5;
 let ball, ballBody;
 
-const tee = new THREE.Vector2(-10, -10); 
-const hole = new THREE.Vector2(9, 8);
-const plateauHeight = 0.5;
+const tee = new THREE.Vector2(); 
+const hole = new THREE.Vector2();
+let plateauHeight = 0.5;
 const holeRadius = 1.3;
 const holeDepth = 0.5;
 let holeScored = false;
@@ -56,7 +58,67 @@ let aimArrow, dragLine;
 const aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const aimPoint = new THREE.Vector3();
 const shotDir = new THREE.Vector3();
+
 let shotPower = 0;
+
+// ---------- Niveles ----------
+let currentLevel = 0;
+let strokes = 0;
+let totalStrokes = 0;
+const levelObjects = []; //mallas (con cuerpo físico) del nivel
+let hud;
+const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x8b5a2b });
+const obstacleMaterial = new THREE.MeshPhongMaterial({ color: 0xb0623a });
+const yAxis = new THREE.Vector3(0, 1, 0);
+
+const levels = [
+  {
+    name: "Nivel 1",
+    tee: [-10, 0],
+    hole: [10, 0],
+    terrain: {
+      height: 0.5
+    },
+    obstacles: [
+      ...walls([[-12, -3], [12, -3]], { height: 1 }),
+      ...walls([[-12, 3], [12, 3]], { height: 1 }),
+      wall(0, -3, 0, 0, { thickness: 0.5, height: 1 })
+    ]
+  },
+
+  {
+    name: "Nivel 2",
+    tee: [-11, -10],
+    hole: [11, 10],
+    terrain: {
+      height: 0.5
+    },
+    obstacles: [
+      wall(-7, -10, -7, 3),
+      wall(-7, 3, 1, 3),
+      wall(-1, -3, -1, 10),
+      wall(-1, -3, 7, -3),
+      wall(7, -3, 7, 10)
+    ]
+  },
+
+  {
+    name: "Nivel 3",
+    tee: [-11, 0],
+    hole: [11, 0],
+    terrain: {
+      height: 0.5
+    },
+    obstacles: [
+      wall(-6, -3, -6, 3),
+      wall(-2, -3, -2, 3),
+      wall(2, -3, 2, 3),
+      wall(6, -3, 6, 3),
+      wall(-6, 3, -2, 3),
+      wall(2, -3, 6, -3)
+    ]
+  }
+];
 
 //Inicialización ammo
 Ammo(Ammo).then(start);
@@ -221,8 +283,8 @@ function createTerrainMesh() {
 
 //Forma física del terreno
 function createTerrainShape() {
-  const heightScale = 1; //no se usa con PHY_FLOAT
-  const upAxis = 1; //eje y
+  const heightScale = 1; 
+  const upAxis = 1;
   const hdt = "PHY_FLOAT";
   const flipQuadEdges = false;
 
@@ -234,7 +296,7 @@ function createTerrainShape() {
     for (let i = 0; i < terrainWidth; i++) {
       Ammo.HEAPF32[(ammoHeightData + p2) >> 2] = heightData[p];
       p++;
-      p2 += 4; //4 bytes por float
+      p2 += 4;
     }
   }
 
@@ -261,7 +323,7 @@ function createTerrainShape() {
 
 //Cuerpo rígido estático del terreno
 function createTerrainBody() {
-  const groundShape = createTerrainShape();
+  terrainShape = createTerrainShape();
 
   const groundTransform = new Ammo.btTransform();
   groundTransform.setIdentity();
@@ -271,25 +333,27 @@ function createTerrainBody() {
   );
 
   const groundMotionState = new Ammo.btDefaultMotionState(groundTransform);
-  const groundBody = new Ammo.btRigidBody(
+
+  terrainBody = new Ammo.btRigidBody(
     new Ammo.btRigidBodyConstructionInfo(
       0,
       groundMotionState,
-      groundShape,
+      terrainShape,
       new Ammo.btVector3(0, 0, 0)
     )
   );
-  groundBody.setFriction(0.8);
-  groundBody.setRestitution(0.2);
-  physicsWorld.addRigidBody(groundBody);
+
+  terrainBody.setFriction(0.8);
+  terrainBody.setRestitution(0.2);
+
+  physicsWorld.addRigidBody(terrainBody);
 }
 
 // ====================== OBJETOS ======================
 
 function createObjects() {
-  //Terreno: gráfico + física
-  createTerrainMesh();
-  createTerrainBody();
+  // Cargar nivel actual
+  loadLevel(currentLevel);
 
   //Bordes del campo
   createBorders();
@@ -504,19 +568,18 @@ function onPointerMove(event) {
   if (!aiming) return;
   if (!pointerToPlane(event)) return;
 
-  // Vector de arrastre (bola → puntero), solo en horizontal
+  // Vector de arrastre
   const drag = aimPoint.clone().sub(ball.position);
   drag.y = 0;
 
+  // calculo de la potencia del disparo
   const len = Math.min(drag.length(), maxDrag);
   shotPower = len / maxDrag; // 0..1
 
-  // El golpe va en sentido contrario al arrastre
-  if (drag.lengthSq() > 1e-6) {
-    shotDir.copy(drag).normalize().negate();
-  }
+  // calculo de la dirección del disparo
+  if (drag.lengthSq() > 1e-6) shotDir.copy(drag).normalize().negate();
 
-  // Flecha: dirección, longitud y color (verde → rojo) según la potencia
+  // flecha
   const origin = ball.position.clone();
   origin.y += 0.05;
   const arrowLen = Math.max(0.3, shotPower * maxArrowLength);
@@ -525,10 +588,8 @@ function onPointerMove(event) {
   aimArrow.setLength(arrowLen, Math.min(0.5, arrowLen * 0.4), 0.3);
   aimArrow.setColor(new THREE.Color().setHSL((1 - shotPower) / 3, 1, 0.5));
 
-  // Línea de arrastre (limitada a maxDrag)
-  const end = origin
-    .clone()
-    .addScaledVector(shotDir, -len);
+  // linea de arrastre
+  const end = origin.clone().addScaledVector(shotDir, -len);
   const p = dragLine.geometry.attributes.position;
   p.setXYZ(0, origin.x, origin.y, origin.z);
   p.setXYZ(1, end.x, end.y, end.z);
@@ -542,9 +603,7 @@ function onPointerUp() {
   aimArrow.visible = false;
   dragLine.visible = false;
 
-  if (shotPower < minPower) {
-    return; // arrastre demasiado corto: se cancela
-  }
+  if (shotPower < minPower) return;
 
   const imp = shotPower * maxImpulse;
   ballBody.activate();
@@ -553,10 +612,141 @@ function onPointerUp() {
   );
 }
 
+// ====================== NIVELES ======================
+
+// Muro recto entre dos puntos
+function wall(x1, z1, x2, z2, { thickness = 0.5, height = 1} = {}) {
+  return {
+    kind: "wall",
+    x1, z1, x2, z2,
+    thickness,
+    height
+  };
+}
+
+
+// Varios muros encadenados
+function walls(points, {closed = false, ...opts} = {}) {
+
+  const out = [];
+
+  for (let i = 0; i < points.length - 1; i++) {
+    out.push(wall(
+      ...points[i],
+      ...points[i + 1],
+      opts
+    ));
+  }
+
+  if (closed && points.length > 2) {
+    out.push(wall(
+      ...points[points.length - 1],
+      ...points[0],
+      opts
+    ));
+  }
+
+  return out;
+}
+
+function createWall(data) {
+
+  const {
+    x1, z1,
+    x2, z2,
+    thickness,
+    height
+  } = data;
+
+  // Vector que representa el muro
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+
+  // Longitud del muro
+  const length = Math.hypot(dx, dz);
+
+  // Centro del muro
+  const x = (x1 + x2) / 2;
+  const z = (z1 + z2) / 2;
+
+  // Altura del centro del muro
+  const y = getHeightAt(x, z) + height / 2;
+
+  // Posición
+  const position = new THREE.Vector3(x, y, z);
+
+  // Rotación alrededor del eje Y
+  const angle = -Math.atan2(dz, dx);
+
+  const rotation = new THREE.Quaternion()
+    .setFromAxisAngle(yAxis, angle);
+
+  // Crear muro gráfico y físico
+  const muro = createBoxWithPhysics(
+    length,
+    height,
+    thickness,
+    0,
+    position,
+    rotation,
+    wallMaterial
+  );
+
+  muro.castShadow = true;
+  muro.receiveShadow = true;
+
+  muro.userData.physicsBody.setRestitution(0.6);
+
+  // Guardar para poder eliminarlo al cambiar de nivel
+  levelObjects.push(muro);
+}
+
+function createLevelObstacles(level) {
+
+  for (const obstacle of level.obstacles) {
+
+    switch (obstacle.kind) {
+
+      case "wall":
+        createWall(obstacle);
+        break;
+
+    }
+  }
+}
+
+function loadLevel(index) {
+
+  const level = levels[index];
+
+  // Actualizar parámetros del nivel
+  tee.set(...level.tee);
+  hole.set(...level.hole);
+
+  plateauHeight = level.terrain.height;
+
+  holeScored = false;
+
+  // Generar alturas del terreno
+  heightData = generateHeight(
+    terrainWidth,
+    terrainDepth,
+    terrainMinHeight,
+    terrainMaxHeight
+  );
+
+  // Crear terreno gráfico y físico
+  createTerrainMesh();
+  createTerrainBody();
+
+  // Crear obstáculos
+  createLevelObstacles(level);
+}
+
 // ====================== EVENTOS ======================
 
 function initInput() {
-  // Flecha de dirección/potencia
+
   aimArrow = new THREE.ArrowHelper(
     new THREE.Vector3(1, 0, 0),
     new THREE.Vector3(),
@@ -565,24 +755,25 @@ function initInput() {
     0.4,
     0.3
   );
+
   aimArrow.visible = false;
   scene.add(aimArrow);
 
-  // Línea de "tirachinas" desde la bola hasta el punto de arrastre
   const lineGeo = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(),
     new THREE.Vector3(),
   ]);
+
   dragLine = new THREE.Line(
     lineGeo,
     new THREE.LineBasicMaterial({ color: 0xffffff })
   );
+
   dragLine.frustumCulled = false;
   dragLine.visible = false;
   scene.add(dragLine);
 
   const canvas = renderer.domElement;
-  canvas.style.touchAction = "none"; // para que funcione también en táctil
 
   canvas.addEventListener("pointerdown", onPointerDown);
   window.addEventListener("pointermove", onPointerMove);

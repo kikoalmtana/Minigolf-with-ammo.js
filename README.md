@@ -82,7 +82,7 @@ Con esto tendríamos por ahora un escenario muy básico básico, plano, sin obst
 
 <img src=".//readme_assets/campo.png" alt="campo básico" width="100%">
 
-### Cración de la pelota y movimiento de la pelota
+### Creando la pelota
 
 Para jugar al minigolf hace falta una pelota y debe ser posible poder meterla en el hoyo, por ello vamos a crear funciones que nos ayuden a crear la pelota, lo primero es inicializar variables donde almacenar la pelota y sus datos:
 
@@ -177,6 +177,8 @@ function checkHole() {
 Luego solo queda llamar en createObjects() a createBall() y al método checkHole() en animationLoop(), justo después de updatePhysics()
 
 <img src=".//readme_assets/campo_y_bola.png" alt="bola añadida" width="100%">
+
+### Introduciendo la mecánica de golpear la pelota
 
 Ahora para mover la pelota, se va a implementar unaa mecanica con la que haciendo "click" sobre ella, y arrastrando en cualquier dirección, podemos definir una flecha con la que podemos indicar la dirección a la que empujar la pelota, y en función de su longitud, podemos indicar la fuerza con la que la queremos empujar.
 
@@ -368,3 +370,277 @@ function onWindowResize() {
 Con esto ya podríamos golpear la pelota, y además, tendríamos un buen indicador visual del golpeo:
 
 <img src=".//readme_assets/golpeo_pelota.gif" alt="golpeo" width="100%">
+
+### Diseño de niveles
+
+Una vez podemos jugar al minigolf en un terreno básico, deberíamos poder jugar diferentes niveles, cada vez más complicados y que requieran de golpear más veces la pelota, o con más precisión.
+
+Las variables, hasta ahora constantes, que definen de forma precisa un nivel son:
+
+- El punto de salida de la bola
+- El punto donde se encuentra el hoyo
+- El terreno
+- Los posibles obstáculos o paredes
+
+Para ello vamos a definir primero estos parámetros como variables en lugar de constantes, y vamos a definir una lista de niveles:
+
+```js
+// ---------- Parámetros del terreno (heightfield) ----------
+...
+let terrainShape;
+let terrainBody;
+
+// ---------- Parámetros del juego ----------
+...
+
+const tee = new THREE.Vector2(); 
+const hole = new THREE.Vector2();
+let plateauHeight = 0.5;
+
+// ---------- Niveles ----------
+let currentLevel = 0;
+let strokes = 0;
+let totalStrokes = 0;
+const levelObjects = []; //mallas (con cuerpo físico) del nivel
+let hud;
+const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x8b5a2b });
+const obstacleMaterial = new THREE.MeshPhongMaterial({ color: 0xb0623a });
+const yAxis = new THREE.Vector3(0, 1, 0);
+```
+
+Hemos añadido una variable que guarda el cuerpo del terreno, a su vez que no inicializamos los valores de tee, hole, y plateauHeight, y hemos creado las variables y constantes que se usarán para los diferentes niveles.
+
+Los niveles se van a diferenciar entre ellos por la posición de los obstáculos y por la posición de inicio y final de la bola y el hoyo, respectivamente.
+
+Entonces lo primero que debemos hacer es implementar una función que nos permita crear muros en la escena: 
+
+```js
+// Muro recto entre dos puntos
+function wall(x1, z1, x2, z2, { thickness = 0.5, height = 1} = {}) {
+  return {
+    kind: "wall",
+    x1, z1, x2, z2,
+    thickness,
+    height
+  };
+}
+
+
+// Varios muros encadenados
+function walls(points, {closed = false, ...opts} = {}) {
+
+  const out = [];
+
+  for (let i = 0; i < points.length - 1; i++) {
+    out.push(wall(
+      ...points[i],
+      ...points[i + 1],
+      opts
+    ));
+  }
+
+  if (closed && points.length > 2) {
+    out.push(wall(
+      ...points[points.length - 1],
+      ...points[0],
+      opts
+    ));
+  }
+
+  return out;
+}
+```
+
+La función wall nos permite definir los parámetros necesarios para crear 1 muro entre un punto A (x1, z1) y un punto B (x2, z2), por otro lado la función walls permite definir varios muros conectados entre ellos, siendo points una sucesión de puntos (por ejemplo un punto A, B y C) de forma que crea un muro entre 2 puntos consecutivos (uno de A a B y otro de B a C) creando un muro más largo con posibles curvas.
+
+Por otro lado, para poder crear un muro necesitamos definirlo con createBoxWithPhysics y para ello vamos a crear una función que pueda recibir la salida de wall o walls y crear a partir de ellos los objetos:
+
+```js
+function createWall(data) {
+
+  const {
+    x1, z1,
+    x2, z2,
+    thickness,
+    height
+  } = data;
+
+  // Vector que representa el muro
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+
+  // Longitud del muro
+  const length = Math.hypot(dx, dz);
+
+  // Centro del muro
+  const x = (x1 + x2) / 2;
+  const z = (z1 + z2) / 2;
+
+  // Altura del centro del muro
+  const y = getHeightAt(x, z) + height / 2;
+
+  // Posición
+  const position = new THREE.Vector3(x, y, z);
+
+  // Rotación alrededor del eje Y
+  const angle = -Math.atan2(dz, dx);
+
+  const rotation = new THREE.Quaternion()
+    .setFromAxisAngle(yAxis, angle);
+
+  // Crear muro gráfico y físico
+  const muro = createBoxWithPhysics(
+    length,
+    height,
+    thickness,
+    0,
+    position,
+    rotation,
+    wallMaterial
+  );
+
+  muro.castShadow = true;
+  muro.receiveShadow = true;
+
+  muro.userData.physicsBody.setRestitution(0.6);
+
+  // Guardar para poder eliminarlo al cambiar de nivel
+  levelObjects.push(muro);
+}
+```
+
+La ventaja que tiene esta implementación es que podemos crear muros para los niveles de una forma muy sencilla y cómoda. Esta función almacena los muros en levelObjects, por lo que debemos crear otra función que cree los objetos como tal en la escena.
+
+```js
+function createLevelObstacles(level) {
+
+  for (const obstacle of level.obstacles) {
+
+    switch (obstacle.kind) {
+
+      case "wall":
+        createWall(obstacle);
+        break;
+
+    }
+  }
+}
+```
+
+Con todo esto ya podemos empezar a definir los niveles, para ello vamos a crear una variable "Levels" que almacene todo lo que caracteriza a un nivel, aquí se muestra un ejemplo con el nivel 2:
+
+```js
+const levels = [
+  {
+    name: "Nivel 2",
+    tee: [-11, -10],
+    hole: [11, 10],
+    terrain: {
+      height: 0.5
+    },
+    obstacles: [
+      wall(-7, -10, -7, 3),
+      wall(-7, 3, 1, 3),
+      wall(-1, -3, -1, 10),
+      wall(-1, -3, 7, -3),
+      wall(7, -3, 7, 10)
+    ]
+  }
+]
+```
+
+Considerando que ahora la construcción del terreno va a ser dinámica, puesto a que va a cambiar el terreno en función del nivel, debemos hacer modificaciones que nos permitan usar variables globales en lugar de variables locales en la función createTerrainBody():
+
+```js
+function createTerrainBody() {
+  terrainShape = createTerrainShape();
+
+  const groundTransform = new Ammo.btTransform();
+  groundTransform.setIdentity();
+  //Bullet recentra el heightfield en su caja envolvente, hay que desplazarlo
+  groundTransform.setOrigin(
+    new Ammo.btVector3(0, (terrainMaxHeight + terrainMinHeight) / 2, 0)
+  );
+
+  const groundMotionState = new Ammo.btDefaultMotionState(groundTransform);
+
+  terrainBody = new Ammo.btRigidBody(
+    new Ammo.btRigidBodyConstructionInfo(
+      0,
+      groundMotionState,
+      groundShape,
+      new Ammo.btVector3(0, 0, 0)
+    )
+  );
+
+  terrainBody.setFriction(0.8);
+  terrainBody.setRestitution(0.2);
+
+  physicsWorld.addRigidBody(terrainBody);
+}
+```
+
+Hemos sustituido las constantes locales groundBody y groundShape por las variables terrainBody y terrainShape, precisamente para que sean variables en función del nivel.
+
+Una vez tenemos todas las utilidades necesarias para poder crear un nivel con obstáculos a partir de los niveles definidos en Levels y hemos modificado lo que teníamos previamente para definir una escena básica, podemos implementar una función loadLevel que toma un nivel de Levels y actualiza los parámetros del nivel y crea el terreno gráfico y físico, mas los obstáculos
+
+```js
+function loadLevel(index) {
+
+  const level = levels[index];
+
+  // Actualizar parámetros del nivel
+  tee.set(...level.tee);
+  hole.set(...level.hole);
+
+  plateauHeight = level.terrain.height;
+
+  holeScored = false;
+
+  // Generar alturas del terreno
+  heightData = generateHeight(
+    terrainWidth,
+    terrainDepth,
+    terrainMinHeight,
+    terrainMaxHeight
+  );
+
+  // Crear terreno gráfico y físico
+  createTerrainMesh();
+  createTerrainBody();
+
+  // Crear obstáculos
+  createLevelObstacles(level);
+}
+```
+
+Por último debemos modificar la función createObjects para que llame a loadLevel donde antes creaba el terreno gráfico y físico
+
+```js
+function createObjects() {
+  // Cargar nivel actual
+  loadLevel(currentLevel);
+
+  //Bordes del campo
+  createBorders();
+
+  //Marca visual del hoyo (aro blanco) y de la salida
+  const aro = new THREE.Mesh(
+    new THREE.RingGeometry(holeRadius * 0.95, holeRadius, 48),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
+  );
+  aro.rotation.x = -Math.PI / 2;
+  aro.position.set(
+    hole.x,
+    getHeightAt(hole.x, hole.y) + holeDepth + 0.02,
+    hole.y
+  );
+  scene.add(aro);
+
+  //Bola
+  createBall();
+}
+```
+
+Con esto ya podríamos visualizar el nivel 1
+
