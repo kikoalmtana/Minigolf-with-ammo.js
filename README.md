@@ -10,16 +10,16 @@ Para este proyecto se ha creado un minijuego utilizando el motor de físicas amm
 
 En este repositorio se encuentra el código del proyecto, un video demostración del resultado final del proyecto y en este README se encuentra la explicación del código paso a paso, mostrando el progrreso del proyecto y explicando las decisiones de proyecto.
 
-![Enlace al video de YouTube (demo)]()
+  [Enlace al video de YouTube (demo)](https://youtu.be/Q2aZRDkVn-E)
 
 ### Índice
 
-1. ![Inicialización del proyecto y creación del terreno](#inicializacion-del-proyecto-y-creacion-del-terreno)
-2. ![Creación de la pelota]()
-3. ![Introduciendo la mecánica de golpear la pelota]()
-4. ![Diseño de niveles]()
-5. ![Resultado final]()
-6. ![Referencias y conversaciones con IA]()
+1. [Inicialización del proyecto y creación del terreno](#inicialización-del-proyecto-y-creación-del-terreno)
+2. [Creando la pelota](#creando-la-pelota)
+3. [Introduciendo la mecánica de golpear la pelota](#introduciendo-la-mecánica-de-golpear-la-pelota)
+4. [Diseño de niveles](#diseño-de-niveles)
+5. [Pasar de nivel + HUD](#pasar-de-nivel--hud)
+6. [Referencias y uso de IA](#referencias-y-uso-de-ia)
 
 ### Inicialización del proyecto y creación del terreno
 
@@ -857,3 +857,12 @@ function animationLoop() {
 
 Y con esto podríamos pasar entre niveles una vez completamos uno, y concluiría el desarrollo del minijuego
 
+<img src=".//readme_assets/paso_de_nivel.gif" alt="nivel 1" width="100%">
+
+### Referencias y uso de IA
+
+- ![Conversación con Claude para adaptar el código base](https://claude.ai/share/745cff88-0ed4-4286-bd6c-cad910004e13)
+
+- ![Conversación con Claude para la mecánica del golpeo de la bola](https://claude.ai/share/13561214-1b3d-4c99-be79-8eb9c82c7e14)
+
+- ![Conversación con ChatGPT para diseñar los niveles](https://chatgpt.com/c/6b09e597-6b00-83eb-8eb1-d6c77787ce0e)
